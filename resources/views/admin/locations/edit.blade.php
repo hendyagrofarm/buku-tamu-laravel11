@@ -1,0 +1,4 @@
+@extends('layouts.admin')
+@section('title','Edit Lokasi')
+@section('page-title','Edit Lokasi')
+@section('content')<form method="POST" action="{{ route('admin.locations.update',$location) }}" class="max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">@csrf @method('PUT') @include('admin.locations._form')</form>@endsection

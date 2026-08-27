@@ -1,0 +1,15 @@
+@extends('layouts.admin')
+@section('title', 'Dashboard')
+@section('page-title', 'Dashboard')
+@section('content')
+<div class="mb-5 flex flex-wrap items-center justify-between gap-3"><div><p class="text-sm text-slate-500">Data dashboard mengikuti lokasi petugas.</p></div>@if(auth()->user()->isAdmin())<form><select name="location_id" onchange="this.form.submit()" class="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"><option value="">Semua Lokasi</option>@foreach($locations as $loc)<option value="{{ $loc->id }}" @selected(request('location_id')==$loc->id)>{{ $loc->name }}</option>@endforeach</select></form>@else<div class="rounded-full bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700">{{ $location?->name ?? '-' }}</div>@endif</div><div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+@foreach([['Tamu Hari Ini',$stats['today'],'📅'],['Belum Survey',$stats['pending_survey'],'⏳'],['Survey Hari Ini',$stats['surveyed_today'],'✓'],['Rata-rata Rating',$stats['average_rating'] ?: '0','★']] as $item)
+<div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div class="flex items-start justify-between"><div><p class="text-sm font-semibold text-slate-500">{{ $item[0] }}</p><p class="mt-3 text-4xl font-black text-slate-900">{{ $item[1] }}</p></div><div class="grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-xl">{{ $item[2] }}</div></div></div>
+@endforeach
+</div>
+<div class="mt-6 rounded-3xl border border-slate-200 bg-white shadow-sm"><div class="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><h3 class="font-bold">Kunjungan Terbaru</h3><p class="text-sm text-slate-500">Aktivitas tamu dan hasil survey</p></div><a href="{{ route('admin.visits.index') }}" class="text-sm font-bold text-emerald-700">Lihat semua</a></div><div class="overflow-x-auto"><table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th class="px-5 py-3">Tamu</th><th class="px-5 py-3">Tujuan</th><th class="px-5 py-3">Masuk</th><th class="px-5 py-3">Survey</th></tr></thead><tbody class="divide-y divide-slate-100">
+@forelse($recentVisits as $visit)
+<tr><td class="px-5 py-4"><a href="{{ route('admin.visits.show',$visit) }}" class="font-bold text-slate-900 hover:text-emerald-700">{{ $visit->visitor->name }}</a><p class="text-xs text-slate-500">{{ $visit->visitor->company }}</p></td><td class="px-5 py-4">{{ $visit->employee_name ?: $visit->employee?->name ?: '-' }}<p class="text-xs text-slate-500">{{ $visit->employee?->division?->name ?: '-' }}</p></td><td class="whitespace-nowrap px-5 py-4">{{ $visit->check_in_at->format('d/m/Y H:i') }}</td><td class="px-5 py-4">@if($visit->satisfaction_rating)<span class="text-lg tracking-wide text-amber-400">{{ str_repeat('★', $visit->satisfaction_rating) }}</span>@else<span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">Belum Survey</span>@endif</td></tr>
+@empty<tr><td colspan="4" class="px-5 py-10 text-center text-slate-500">Belum ada data kunjungan.</td></tr>@endforelse
+</tbody></table></div></div>
+@endsection

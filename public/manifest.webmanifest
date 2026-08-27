@@ -1,0 +1,12 @@
+{
+    "name": "Buku Tamu Digital",
+    "short_name": "Buku Tamu",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#f8fafc",
+    "theme_color": "#14532d",
+    "description": "Aplikasi pendaftaran dan pencatatan kunjungan tamu.",
+    "icons": [
+        {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+    ]
+}
