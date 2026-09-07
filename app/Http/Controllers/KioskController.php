@@ -8,122 +8,667 @@ use App\Models\Visitor;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
+use Throwable;
 
 class KioskController extends Controller
 {
     public function home(): View|RedirectResponse
     {
         $location = $this->location();
-        if (!$location) return $this->locationPicker();
+
+        if (!$location) {
+            return $this->locationPicker();
+        }
 
         $today = now()->toDateString();
+
         $base = Visit::where('location_id', $location->id);
+
         $stats = [
-            'today' => (clone $base)->whereDate('check_in_at', $today)->count(),
-            'pending_survey' => (clone $base)->whereDate('check_in_at', $today)->whereNull('satisfaction_rating')->count(),
-            'surveyed' => (clone $base)->whereDate('check_in_at', $today)->whereNotNull('satisfaction_rating')->count(),
+            'today' => (clone $base)
+                ->whereDate('check_in_at', $today)
+                ->count(),
+
+            'pending_survey' => (clone $base)
+                ->whereDate('check_in_at', $today)
+                ->whereNull('satisfaction_rating')
+                ->count(),
+
+            'surveyed' => (clone $base)
+                ->whereDate('check_in_at', $today)
+                ->whereNotNull('satisfaction_rating')
+                ->count(),
         ];
-        $recentVisits = Visit::with(['visitor', 'location'])
-            ->where('location_id', $location->id)->whereDate('check_in_at', $today)->latest('check_in_at')->limit(5)->get();
-        return view('kiosk.home', compact('stats', 'recentVisits', 'location'));
+
+        $recentVisits = Visit::with([
+                'visitor',
+                'location',
+                'employee',
+            ])
+            ->where('location_id', $location->id)
+            ->whereDate('check_in_at', $today)
+            ->latest('check_in_at')
+            ->limit(5)
+            ->get();
+
+        return view(
+            'kiosk.home',
+            compact(
+                'stats',
+                'recentVisits',
+                'location'
+            )
+        );
     }
+
 
     public function locationPicker(): View
     {
-        $locations = Location::where('is_active', true)->orderBy('name')->get();
-        return view('kiosk.location-picker', compact('locations'));
+        $locations = Location::where(
+                'is_active',
+                true
+            )
+            ->orderBy('name')
+            ->get();
+
+        return view(
+            'kiosk.location-picker',
+            compact('locations')
+        );
     }
 
-    public function selectLocation(Location $location): RedirectResponse
+
+    public function selectLocation(
+        Location $location
+    ): RedirectResponse
     {
-        abort_unless($location->is_active, 404);
-        session(['kiosk_location_id' => $location->id]);
-        return redirect()->route('kiosk.home');
+        abort_unless(
+            $location->is_active,
+            404
+        );
+
+        session([
+            'kiosk_location_id' => $location->id
+        ]);
+
+        return redirect()
+            ->route('kiosk.home');
     }
+
 
     public function create(): View|RedirectResponse
     {
         $location = $this->location();
-        if (!$location) return redirect()->route('kiosk.location.picker');
-        return view('kiosk.register', compact('location'));
+
+        if (!$location) {
+            return redirect()
+                ->route('kiosk.location.picker');
+        }
+
+        return view(
+            'kiosk.register',
+            compact('location')
+        );
     }
 
-    public function store(Request $request): RedirectResponse
+
+    /*
+    |--------------------------------------------------------------------------
+    | SIMPAN CHECK IN TAMU
+    |--------------------------------------------------------------------------
+    |
+    | Menyimpan:
+    | - Data tamu
+    | - Nama pegawai yang ditemui
+    | - Keperluan
+    | - Jumlah orang
+    | - Foto identitas KTP / SIM
+    |
+    */
+
+    public function store(
+        Request $request
+    ): RedirectResponse
     {
         $location = $this->location();
-        if (!$location) return redirect()->route('kiosk.location.picker');
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100'], 'phone' => ['required', 'string', 'max:30'],
-            'company' => ['required', 'string', 'max:150'], 'employee_name' => ['required', 'string', 'max:150'],
-            'purpose' => ['required', 'string', 'max:500'], 'number_of_people' => ['required', 'integer', 'min:1', 'max:20'],
-            'privacy' => ['accepted'],
-        ], ['privacy.accepted' => 'Silakan menyetujui penggunaan data untuk keperluan kunjungan.']);
 
-        $visit = DB::transaction(function () use ($validated, $location) {
-            $visitor = Visitor::updateOrCreate(['phone' => $validated['phone']], ['name' => $validated['name'], 'company' => $validated['company']]);
-            do { $visitNumber = 'BT-'.now()->format('Ymd').'-'.Str::upper(Str::random(4)); }
-            while (Visit::where('visit_number', $visitNumber)->exists());
-            return Visit::create([
-                'visit_number' => $visitNumber, 'visitor_id' => $visitor->id, 'location_id' => $location->id,
-                'employee_id' => null, 'employee_name' => $validated['employee_name'], 'purpose' => $validated['purpose'], 'number_of_people' => $validated['number_of_people'],
-                'check_in_at' => now(), 'status' => 'active',
-            ]);
-        });
-        return redirect()->route('kiosk.survey.show', $visit);
+        if (!$location) {
+            return redirect()
+                ->route('kiosk.location.picker');
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDASI
+        |--------------------------------------------------------------------------
+        */
+
+        $validated = $request->validate(
+            [
+                'name' => [
+                    'required',
+                    'string',
+                    'max:100',
+                ],
+
+                'phone' => [
+                    'required',
+                    'string',
+                    'max:30',
+                ],
+
+                'company' => [
+                    'required',
+                    'string',
+                    'max:150',
+                ],
+
+                'employee_name' => [
+                    'required',
+                    'string',
+                    'max:150',
+                ],
+
+                'purpose' => [
+                    'required',
+                    'string',
+                    'max:500',
+                ],
+
+                'number_of_people' => [
+                    'required',
+                    'integer',
+                    'min:1',
+                    'max:20',
+                ],
+
+                /*
+                 * FOTO KTP / SIM
+                 *
+                 * Maksimal 5 MB.
+                 */
+
+                'identity_photo' => [
+                    'required',
+                    'image',
+                    'mimes:jpg,jpeg,png,webp',
+                    'max:5120',
+                ],
+
+                'privacy' => [
+                    'accepted',
+                ],
+            ],
+            [
+                'name.required' =>
+                    'Nama lengkap wajib diisi.',
+
+                'phone.required' =>
+                    'Nomor telepon wajib diisi.',
+
+                'company.required' =>
+                    'Asal perusahaan atau instansi wajib diisi.',
+
+                'employee_name.required' =>
+                    'Nama pegawai yang ditemui wajib diisi.',
+
+                'purpose.required' =>
+                    'Keperluan kunjungan wajib diisi.',
+
+                'number_of_people.required' =>
+                    'Jumlah orang wajib diisi.',
+
+                'identity_photo.required' =>
+                    'Silakan ambil foto KTP atau SIM terlebih dahulu.',
+
+                'identity_photo.image' =>
+                    'Foto identitas harus berupa gambar.',
+
+                'identity_photo.mimes' =>
+                    'Format foto harus JPG, JPEG, PNG, atau WEBP.',
+
+                'identity_photo.max' =>
+                    'Ukuran foto identitas maksimal 5 MB.',
+
+                'privacy.accepted' =>
+                    'Silakan menyetujui penggunaan data untuk keperluan kunjungan.',
+            ]
+        );
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SIMPAN FOTO IDENTITAS
+        |--------------------------------------------------------------------------
+        |
+        | Foto disimpan pada disk LOCAL/PRIVATE.
+        | Jadi foto tidak dapat dibuka langsung oleh publik.
+        |
+        */
+
+        $identityPhotoPath = null;
+
+
+        try {
+
+            $identityPhotoPath = $request
+                ->file('identity_photo')
+                ->store(
+                    'identity-documents',
+                    'local'
+                );
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | TRANSAKSI DATABASE
+            |--------------------------------------------------------------------------
+            */
+
+            $visit = DB::transaction(
+                function () use (
+                    $validated,
+                    $location,
+                    $identityPhotoPath
+                ) {
+
+                    /*
+                     * Cari visitor berdasarkan nomor telepon.
+                     * Jika sudah ada, update nama/perusahaan.
+                     * Jika belum ada, buat visitor baru.
+                     */
+
+                    $visitor = Visitor::updateOrCreate(
+                        [
+                            'phone' =>
+                                $validated['phone']
+                        ],
+                        [
+                            'name' =>
+                                $validated['name'],
+
+                            'company' =>
+                                $validated['company'],
+                        ]
+                    );
+
+
+                    /*
+                     * Buat nomor kunjungan unik.
+                     */
+
+                    do {
+
+                        $visitNumber =
+                            'BT-' .
+                            now()->format('Ymd') .
+                            '-' .
+                            Str::upper(
+                                Str::random(4)
+                            );
+
+                    } while (
+                        Visit::where(
+                            'visit_number',
+                            $visitNumber
+                        )->exists()
+                    );
+
+
+                    /*
+                     * Simpan data kunjungan.
+                     */
+
+                    return Visit::create(
+                        [
+                            'visit_number' =>
+                                $visitNumber,
+
+                            'visitor_id' =>
+                                $visitor->id,
+
+                            'location_id' =>
+                                $location->id,
+
+                            /*
+                             * Karena pegawai sekarang
+                             * diinput secara manual.
+                             */
+
+                            'employee_id' =>
+                                null,
+
+                            'employee_name' =>
+                                $validated[
+                                    'employee_name'
+                                ],
+
+                            'purpose' =>
+                                $validated[
+                                    'purpose'
+                                ],
+
+                            'number_of_people' =>
+                                $validated[
+                                    'number_of_people'
+                                ],
+
+                            /*
+                             * FOTO IDENTITAS
+                             */
+
+                            'identity_photo' =>
+                                $identityPhotoPath,
+
+                            'check_in_at' =>
+                                now(),
+
+                            'status' =>
+                                'active',
+                        ]
+                    );
+                }
+            );
+
+        } catch (Throwable $e) {
+
+            /*
+             * Jika database gagal setelah foto
+             * tersimpan, hapus kembali fotonya
+             * supaya tidak ada file yatim.
+             */
+
+            if (
+                $identityPhotoPath &&
+                Storage::disk('local')
+                    ->exists(
+                        $identityPhotoPath
+                    )
+            ) {
+
+                Storage::disk('local')
+                    ->delete(
+                        $identityPhotoPath
+                    );
+            }
+
+
+            /*
+             * Lempar error asli kembali
+             * agar Laravel mencatatnya ke log.
+             */
+
+            throw $e;
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | LANJUT KE SURVEY
+        |--------------------------------------------------------------------------
+        |
+        | Alur asli tetap dipertahankan.
+        |
+        */
+
+        return redirect()
+            ->route(
+                'kiosk.survey.show',
+                $visit
+            );
     }
+
 
     public function status(): View|RedirectResponse
     {
         $location = $this->location();
-        if (!$location) return redirect()->route('kiosk.location.picker');
-        $visits = Visit::with(['visitor', 'location'])->where('location_id', $location->id)->whereDate('check_in_at', today())->latest('check_in_at')->get();
-        return view('kiosk.status', compact('visits', 'location'));
+
+        if (!$location) {
+            return redirect()
+                ->route('kiosk.location.picker');
+        }
+
+        $visits = Visit::with([
+                'visitor',
+                'location',
+                'employee',
+            ])
+            ->where(
+                'location_id',
+                $location->id
+            )
+            ->whereDate(
+                'check_in_at',
+                today()
+            )
+            ->latest('check_in_at')
+            ->get();
+
+        return view(
+            'kiosk.status',
+            compact(
+                'visits',
+                'location'
+            )
+        );
     }
+
 
     public function surveyIndex(): View|RedirectResponse
     {
         $location = $this->location();
-        if (!$location) return redirect()->route('kiosk.location.picker');
-        $visits = Visit::with(['visitor', 'location'])->where('location_id', $location->id)->whereDate('check_in_at', today())->whereNull('satisfaction_rating')->latest('check_in_at')->get();
-        return view('kiosk.survey-index', compact('visits', 'location'));
+
+        if (!$location) {
+            return redirect()
+                ->route('kiosk.location.picker');
+        }
+
+        $visits = Visit::with([
+                'visitor',
+                'location',
+            ])
+            ->where(
+                'location_id',
+                $location->id
+            )
+            ->whereDate(
+                'check_in_at',
+                today()
+            )
+            ->whereNull(
+                'satisfaction_rating'
+            )
+            ->latest('check_in_at')
+            ->get();
+
+        return view(
+            'kiosk.survey-index',
+            compact(
+                'visits',
+                'location'
+            )
+        );
     }
 
-    public function survey(Visit $visit): View|RedirectResponse
+
+    public function survey(
+        Visit $visit
+    ): View|RedirectResponse
     {
         $location = $this->location();
-        if (!$location) return redirect()->route('kiosk.location.picker');
-        abort_unless((int) $visit->location_id === (int) $location->id, 404);
-        if ($visit->satisfaction_rating !== null) return redirect()->route('kiosk.visit.success', $visit);
-        $visit->load(['visitor', 'location']);
-        return view('kiosk.survey', compact('visit'));
+
+        if (!$location) {
+            return redirect()
+                ->route('kiosk.location.picker');
+        }
+
+        abort_unless(
+            (int) $visit->location_id ===
+            (int) $location->id,
+            404
+        );
+
+
+        if (
+            $visit->satisfaction_rating !== null
+        ) {
+
+            return redirect()
+                ->route(
+                    'kiosk.visit.success',
+                    $visit
+                );
+        }
+
+
+        $visit->load([
+            'visitor',
+            'location',
+        ]);
+
+
+        return view(
+            'kiosk.survey',
+            compact('visit')
+        );
     }
 
-    public function submitSurvey(Request $request, Visit $visit): RedirectResponse
+
+    public function submitSurvey(
+        Request $request,
+        Visit $visit
+    ): RedirectResponse
     {
         $location = $this->location();
-        if (!$location) return redirect()->route('kiosk.location.picker');
-        abort_unless((int) $visit->location_id === (int) $location->id, 404);
-        if ($visit->satisfaction_rating !== null) return redirect()->route('kiosk.visit.success', $visit)->with('success', 'Survey untuk kunjungan ini sudah pernah diisi.');
-        $validated = $request->validate(['rating' => ['required', 'integer', 'between:1,5']], ['rating.required' => 'Silakan pilih rating bintang terlebih dahulu.', 'rating.between' => 'Rating harus antara 1 sampai 5 bintang.']);
-        $visit->update(['satisfaction_rating' => $validated['rating'], 'surveyed_at' => now(), 'status' => 'completed']);
-        return redirect()->route('kiosk.visit.success', $visit);
+
+        if (!$location) {
+            return redirect()
+                ->route('kiosk.location.picker');
+        }
+
+
+        abort_unless(
+            (int) $visit->location_id ===
+            (int) $location->id,
+            404
+        );
+
+
+        if (
+            $visit->satisfaction_rating !== null
+        ) {
+
+            return redirect()
+                ->route(
+                    'kiosk.visit.success',
+                    $visit
+                )
+                ->with(
+                    'success',
+                    'Survey untuk kunjungan ini sudah pernah diisi.'
+                );
+        }
+
+
+        $validated = $request->validate(
+            [
+                'rating' => [
+                    'required',
+                    'integer',
+                    'between:1,5',
+                ],
+            ],
+            [
+                'rating.required' =>
+                    'Silakan pilih rating bintang terlebih dahulu.',
+
+                'rating.between' =>
+                    'Rating harus antara 1 sampai 5 bintang.',
+            ]
+        );
+
+
+        $visit->update(
+            [
+                'satisfaction_rating' =>
+                    $validated['rating'],
+
+                'surveyed_at' =>
+                    now(),
+
+                'status' =>
+                    'completed',
+            ]
+        );
+
+
+        return redirect()
+            ->route(
+                'kiosk.visit.success',
+                $visit
+            );
     }
 
-    public function success(Visit $visit): View|RedirectResponse
+
+    public function success(
+        Visit $visit
+    ): View|RedirectResponse
     {
         $location = $this->location();
-        if (!$location) return redirect()->route('kiosk.location.picker');
-        abort_unless((int) $visit->location_id === (int) $location->id, 404);
-        $visit->load(['visitor', 'location']);
-        return view('kiosk.success', compact('visit'));
+
+        if (!$location) {
+            return redirect()
+                ->route('kiosk.location.picker');
+        }
+
+
+        abort_unless(
+            (int) $visit->location_id ===
+            (int) $location->id,
+            404
+        );
+
+
+        $visit->load([
+            'visitor',
+            'location',
+        ]);
+
+
+        return view(
+            'kiosk.success',
+            compact('visit')
+        );
     }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | LOKASI KIOSK
+    |--------------------------------------------------------------------------
+    */
 
     private function location(): ?Location
     {
-        $id = session('kiosk_location_id');
-        return $id ? Location::where('id', $id)->where('is_active', true)->first() : null;
-    }
+        $id = session(
+            'kiosk_location_id'
+        );
 
+
+        return $id
+            ? Location::where(
+                'id',
+                $id
+            )
+                ->where(
+                    'is_active',
+                    true
+                )
+                ->first()
+            : null;
+    }
 }
