@@ -13,7 +13,7 @@
             <label class="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" name="remember" value="1" class="rounded border-slate-300 text-emerald-600"> Ingat saya</label>
             <button class="w-full rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white shadow-lg shadow-emerald-900/20 hover:bg-emerald-800">Masuk ke Dashboard</button>
         </form>
-        <div class="mt-6 rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-500"><strong>Akun awal:</strong><br>admin@bukutamu.local<br>password123</div>
+        
     </div>
 </div>
 </body></html>
