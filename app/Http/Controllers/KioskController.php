@@ -15,6 +15,12 @@ use Throwable;
 
 class KioskController extends Controller
 {
+    /*
+    |--------------------------------------------------------------------------
+    | BERANDA KIOSK
+    |--------------------------------------------------------------------------
+    */
+
     public function home(): View|RedirectResponse
     {
         $location = $this->location();
@@ -25,21 +31,37 @@ class KioskController extends Controller
 
         $today = now()->toDateString();
 
-        $base = Visit::where('location_id', $location->id);
+        $base = Visit::where(
+            'location_id',
+            $location->id
+        );
 
         $stats = [
             'today' => (clone $base)
-                ->whereDate('check_in_at', $today)
+                ->whereDate(
+                    'check_in_at',
+                    $today
+                )
                 ->count(),
 
             'pending_survey' => (clone $base)
-                ->whereDate('check_in_at', $today)
-                ->whereNull('satisfaction_rating')
+                ->whereDate(
+                    'check_in_at',
+                    $today
+                )
+                ->whereNull(
+                    'satisfaction_rating'
+                )
                 ->count(),
 
             'surveyed' => (clone $base)
-                ->whereDate('check_in_at', $today)
-                ->whereNotNull('satisfaction_rating')
+                ->whereDate(
+                    'check_in_at',
+                    $today
+                )
+                ->whereNotNull(
+                    'satisfaction_rating'
+                )
                 ->count(),
         ];
 
@@ -48,8 +70,14 @@ class KioskController extends Controller
                 'location',
                 'employee',
             ])
-            ->where('location_id', $location->id)
-            ->whereDate('check_in_at', $today)
+            ->where(
+                'location_id',
+                $location->id
+            )
+            ->whereDate(
+                'check_in_at',
+                $today
+            )
             ->latest('check_in_at')
             ->limit(5)
             ->get();
@@ -64,6 +92,12 @@ class KioskController extends Controller
         );
     }
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | PILIH LOKASI
+    |--------------------------------------------------------------------------
+    */
 
     public function locationPicker(): View
     {
@@ -91,7 +125,8 @@ class KioskController extends Controller
         );
 
         session([
-            'kiosk_location_id' => $location->id
+            'kiosk_location_id' =>
+                $location->id
         ]);
 
         return redirect()
@@ -99,13 +134,21 @@ class KioskController extends Controller
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | FORM CHECK IN
+    |--------------------------------------------------------------------------
+    */
+
     public function create(): View|RedirectResponse
     {
         $location = $this->location();
 
         if (!$location) {
             return redirect()
-                ->route('kiosk.location.picker');
+                ->route(
+                    'kiosk.location.picker'
+                );
         }
 
         return view(
@@ -119,14 +162,6 @@ class KioskController extends Controller
     |--------------------------------------------------------------------------
     | SIMPAN CHECK IN TAMU
     |--------------------------------------------------------------------------
-    |
-    | Menyimpan:
-    | - Data tamu
-    | - Nama pegawai yang ditemui
-    | - Keperluan
-    | - Jumlah orang
-    | - Foto identitas KTP / SIM
-    |
     */
 
     public function store(
@@ -137,7 +172,9 @@ class KioskController extends Controller
 
         if (!$location) {
             return redirect()
-                ->route('kiosk.location.picker');
+                ->route(
+                    'kiosk.location.picker'
+                );
         }
 
 
@@ -185,12 +222,6 @@ class KioskController extends Controller
                     'min:1',
                     'max:20',
                 ],
-
-                /*
-                 * FOTO KTP / SIM
-                 *
-                 * Maksimal 5 MB.
-                 */
 
                 'identity_photo' => [
                     'required',
@@ -244,14 +275,9 @@ class KioskController extends Controller
         |--------------------------------------------------------------------------
         | SIMPAN FOTO IDENTITAS
         |--------------------------------------------------------------------------
-        |
-        | Foto disimpan pada disk LOCAL/PRIVATE.
-        | Jadi foto tidak dapat dibuka langsung oleh publik.
-        |
         */
 
         $identityPhotoPath = null;
-
 
         try {
 
@@ -265,7 +291,7 @@ class KioskController extends Controller
 
             /*
             |--------------------------------------------------------------------------
-            | TRANSAKSI DATABASE
+            | SIMPAN DATA DATABASE
             |--------------------------------------------------------------------------
             */
 
@@ -277,15 +303,14 @@ class KioskController extends Controller
                 ) {
 
                     /*
-                     * Cari visitor berdasarkan nomor telepon.
-                     * Jika sudah ada, update nama/perusahaan.
-                     * Jika belum ada, buat visitor baru.
+                     * Cari / buat data tamu
+                     * berdasarkan nomor telepon.
                      */
 
                     $visitor = Visitor::updateOrCreate(
                         [
                             'phone' =>
-                                $validated['phone']
+                                $validated['phone'],
                         ],
                         [
                             'name' =>
@@ -320,7 +345,11 @@ class KioskController extends Controller
 
 
                     /*
-                     * Simpan data kunjungan.
+                     * Simpan kunjungan.
+                     *
+                     * satisfaction_rating masih NULL
+                     * karena survey dilakukan saat
+                     * tamu akan pulang.
                      */
 
                     return Visit::create(
@@ -333,11 +362,6 @@ class KioskController extends Controller
 
                             'location_id' =>
                                 $location->id,
-
-                            /*
-                             * Karena pegawai sekarang
-                             * diinput secara manual.
-                             */
 
                             'employee_id' =>
                                 null,
@@ -357,16 +381,15 @@ class KioskController extends Controller
                                     'number_of_people'
                                 ],
 
-                            /*
-                             * FOTO IDENTITAS
-                             */
-
                             'identity_photo' =>
                                 $identityPhotoPath,
 
                             'check_in_at' =>
                                 now(),
 
+                            /*
+                             * Belum survey.
+                             */
                             'status' =>
                                 'active',
                         ]
@@ -377,9 +400,9 @@ class KioskController extends Controller
         } catch (Throwable $e) {
 
             /*
-             * Jika database gagal setelah foto
-             * tersimpan, hapus kembali fotonya
-             * supaya tidak ada file yatim.
+             * Kalau database gagal,
+             * foto yang sudah tersimpan
+             * dihapus kembali.
              */
 
             if (
@@ -389,18 +412,11 @@ class KioskController extends Controller
                         $identityPhotoPath
                     )
             ) {
-
                 Storage::disk('local')
                     ->delete(
                         $identityPhotoPath
                     );
             }
-
-
-            /*
-             * Lempar error asli kembali
-             * agar Laravel mencatatnya ke log.
-             */
 
             throw $e;
         }
@@ -408,20 +424,33 @@ class KioskController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | LANJUT KE SURVEY
+        | PENTING
         |--------------------------------------------------------------------------
         |
-        | Alur asli tetap dipertahankan.
+        | Setelah Check In TIDAK lagi masuk
+        | langsung ke halaman Survey.
+        |
+        | Sekarang masuk ke halaman sukses.
         |
         */
 
         return redirect()
             ->route(
-                'kiosk.survey.show',
+                'kiosk.visit.success',
                 $visit
+            )
+            ->with(
+                'checkin_success',
+                true
             );
     }
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | STATUS KUNJUNGAN
+    |--------------------------------------------------------------------------
+    */
 
     public function status(): View|RedirectResponse
     {
@@ -429,7 +458,9 @@ class KioskController extends Controller
 
         if (!$location) {
             return redirect()
-                ->route('kiosk.location.picker');
+                ->route(
+                    'kiosk.location.picker'
+                );
         }
 
         $visits = Visit::with([
@@ -458,13 +489,24 @@ class KioskController extends Controller
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | DAFTAR TAMU YANG BELUM SURVEY
+    |--------------------------------------------------------------------------
+    |
+    | Digunakan saat tamu akan pulang.
+    |
+    */
+
     public function surveyIndex(): View|RedirectResponse
     {
         $location = $this->location();
 
         if (!$location) {
             return redirect()
-                ->route('kiosk.location.picker');
+                ->route(
+                    'kiosk.location.picker'
+                );
         }
 
         $visits = Visit::with([
@@ -495,6 +537,12 @@ class KioskController extends Controller
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | FORM SURVEY
+    |--------------------------------------------------------------------------
+    */
+
     public function survey(
         Visit $visit
     ): View|RedirectResponse
@@ -503,8 +551,16 @@ class KioskController extends Controller
 
         if (!$location) {
             return redirect()
-                ->route('kiosk.location.picker');
+                ->route(
+                    'kiosk.location.picker'
+                );
         }
+
+
+        /*
+         * Pastikan kunjungan berasal
+         * dari lokasi kiosk yang aktif.
+         */
 
         abort_unless(
             (int) $visit->location_id ===
@@ -513,10 +569,14 @@ class KioskController extends Controller
         );
 
 
+        /*
+         * Kalau sudah pernah survey,
+         * tidak boleh survey lagi.
+         */
+
         if (
             $visit->satisfaction_rating !== null
         ) {
-
             return redirect()
                 ->route(
                     'kiosk.visit.success',
@@ -538,6 +598,12 @@ class KioskController extends Controller
     }
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | SIMPAN SURVEY
+    |--------------------------------------------------------------------------
+    */
+
     public function submitSurvey(
         Request $request,
         Visit $visit
@@ -547,9 +613,15 @@ class KioskController extends Controller
 
         if (!$location) {
             return redirect()
-                ->route('kiosk.location.picker');
+                ->route(
+                    'kiosk.location.picker'
+                );
         }
 
+
+        /*
+         * Pastikan lokasi sama.
+         */
 
         abort_unless(
             (int) $visit->location_id ===
@@ -558,21 +630,24 @@ class KioskController extends Controller
         );
 
 
+        /*
+         * Jangan simpan survey dua kali.
+         */
+
         if (
             $visit->satisfaction_rating !== null
         ) {
-
             return redirect()
                 ->route(
                     'kiosk.visit.success',
                     $visit
-                )
-                ->with(
-                    'success',
-                    'Survey untuk kunjungan ini sudah pernah diisi.'
                 );
         }
 
+
+        /*
+         * Validasi rating.
+         */
 
         $validated = $request->validate(
             [
@@ -592,6 +667,10 @@ class KioskController extends Controller
         );
 
 
+        /*
+         * Simpan survey.
+         */
+
         $visit->update(
             [
                 'satisfaction_rating' =>
@@ -606,13 +685,37 @@ class KioskController extends Controller
         );
 
 
+        /*
+         * Setelah survey selesai,
+         * tampilkan halaman Terima Kasih.
+         */
+
         return redirect()
             ->route(
                 'kiosk.visit.success',
                 $visit
+            )
+            ->with(
+                'survey_success',
+                true
             );
     }
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | HALAMAN SUKSES
+    |--------------------------------------------------------------------------
+    |
+    | Halaman ini dipakai untuk:
+    |
+    | 1. Setelah Check In
+    | 2. Setelah Survey
+    |
+    | Tampilan dibedakan berdasarkan
+    | satisfaction_rating.
+    |
+    */
 
     public function success(
         Visit $visit
@@ -622,7 +725,9 @@ class KioskController extends Controller
 
         if (!$location) {
             return redirect()
-                ->route('kiosk.location.picker');
+                ->route(
+                    'kiosk.location.picker'
+                );
         }
 
 
@@ -648,7 +753,7 @@ class KioskController extends Controller
 
     /*
     |--------------------------------------------------------------------------
-    | LOKASI KIOSK
+    | AMBIL LOKASI KIOSK DARI SESSION
     |--------------------------------------------------------------------------
     */
 
